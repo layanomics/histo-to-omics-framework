@@ -1,0 +1,113 @@
+# ============================================================
+# BRCA Phase-1 Configuration
+# TCGA-BRCA | RNA-seq + WSI paired cohort
+# ============================================================
+
+project:
+  name: TCGA-BRCA
+  project_id: TCGA-BRCA
+  short: brca
+  phase: phase1
+  description: >
+    Phase-1 data foundation for image-based molecular subtype prediction.
+    Includes full RNA-seq and WSI discovery, pairing, QC, deterministic RNA selection
+    (one file per case), expression matrix building, preprocessing, PAM50 calls,
+    and final WSI<->PAM50 label tables.
+
+paths:
+  meta_dir: data/metadata/brca_phase1
+  processed_dir: data/processed/brca_subtyping
+  raw_dir: data/raw/gdc/brca_phase1
+  out_logs: outputs/brca_subtyping/logs
+  out_tables: outputs/brca_subtyping/tables
+
+gdc_query:
+  project_id: TCGA-BRCA
+
+  rnaseq:
+    data_category: Transcriptome Profiling
+    data_type: Gene Expression Quantification
+    experimental_strategy: RNA-Seq
+    workflow_type: STAR - Counts
+    sample_type: Primary Tumor
+    access: open
+
+  wsi:
+    data_category: Biospecimen
+    data_type: Slide Image
+    data_format: SVS
+    access: open
+
+pairing:
+  key: case_id
+  require_rnaseq: true
+  require_wsi: true
+
+rnaseq_selection:
+  strategy: deterministic
+  rule: >
+    Sort RNA-seq filenames lexicographically and select the first file per case
+    to ensure reproducibility.
+
+download:
+  gdc_client: gdc-client
+  threads: 8
+  token_file: null
+  verify_after: true
+  fail_on_verify: true
+
+expression:
+  rnaseq_download_dir: data/raw/gdc/brca_phase1/rnaseq_star_counts
+  rnaseq_manifest_one_per_case: data/metadata/brca_phase1/brca_rnaseq_manifest_one_per_case.tsv
+  rnaseq_metadata_tsv: data/metadata/brca_phase1/brca_rnaseq_metadata.tsv
+
+  out_counts_csv: data/processed/brca_subtyping/brca_expr_counts.csv
+  out_samples_csv: data/processed/brca_subtyping/brca_expr_samples.csv
+
+  counts_column_preference:
+    - unstranded
+    - stranded_first
+    - stranded_second
+
+preprocess:
+  counts_csv: data/processed/brca_subtyping/brca_expr_counts.csv
+  samples_csv: data/processed/brca_subtyping/brca_expr_samples.csv
+
+  out_counts_preprocessed_csv: data/processed/brca_subtyping/brca_expr_counts_preprocessed.csv
+  out_counts_log2cpm_csv: data/processed/brca_subtyping/brca_expr_counts_log2cpm.csv
+
+  gene_id_col: gene_id
+  min_total_count: 10
+  min_samples_nonzero: 10
+  make_log2cpm: true
+  pseudocount: 1.0
+
+pam50:
+  r_script: scripts/brca_phase1/run_pam50_genefu.R
+
+  # Use log2cpm for PAM50
+  counts_preprocessed_csv: data/processed/brca_subtyping/brca_expr_counts_log2cpm.csv
+  samples_csv: data/processed/brca_subtyping/brca_expr_samples.csv
+
+  out_raw_calls_csv: outputs/brca_subtyping/tables/brca_pam50_raw_calls.csv
+  out_clean_calls_csv: outputs/brca_subtyping/tables/brca_pam50_clean_calls.csv
+  out_qc_txt: outputs/brca_subtyping/logs/pam50_qc.txt
+
+wsi_labeling:
+  paired_cohort_csv: data/processed/brca_subtyping/brca_paired_cohort.csv
+  wsi_metadata_tsv: data/metadata/brca_phase1/brca_wsi_metadata.tsv
+  pam50_clean_calls_csv: outputs/brca_subtyping/tables/brca_pam50_clean_calls.csv
+
+  out_slide_labels_csv: outputs/brca_subtyping/tables/brca_wsi_pam50_slide_labels.csv
+  out_case_labels_csv: outputs/brca_subtyping/tables/brca_wsi_pam50_case_labels.csv
+  out_qc_txt: outputs/brca_subtyping/logs/wsi_pam50_labels_qc.txt
+
+logging:
+  timestamp_format: "%Y%m%d_%H%M%S"
+  save_command: true
+  save_stdout: true
+  save_stderr: true
+
+notes:
+  - Phase-1 ends when we have (RNA->PAM50) labels attached to WSI slide metadata (no images required).
+  - Modeling/tiling starts in Phase-2 using the slide-level label table.
